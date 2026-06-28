@@ -1,0 +1,53 @@
+name: Compile OpenLB 1.8.1 case
+
+on:
+  push:
+    branches:
+      - chatgpt/compile-coalescence-fsi
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout workspace
+        uses: actions/checkout@v4
+
+      - name: Install compiler tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl
+
+      - name: Download OpenLB 1.8.1
+        run: |
+          curl -L --fail --retry 5 \
+            'https://zenodo.org/records/15440776/files/release-1.8.1.tar.gz?download=1' \
+            -o /tmp/openlb-1.8.1.tar.gz
+          mkdir -p /tmp/openlb
+          tar -xzf /tmp/openlb-1.8.1.tar.gz -C /tmp/openlb --strip-components=1
+          test -f /tmp/openlb/olb.h
+
+      - name: Build OpenLB core
+        working-directory: /tmp/openlb
+        run: make -j2
+
+      - name: Compile official contactAngle3d smoke test
+        run: |
+          CASE_CPP=$(find /tmp/openlb/examples -name contactAngle3d.cpp -print -quit)
+          test -n "$CASE_CPP"
+          CASE_DIR=$(dirname "$CASE_CPP")
+          make -C "$CASE_DIR" -j2
+
+      - name: Compile generated case when present
+        run: |
+          if [ ! -f "$GITHUB_WORKSPACE/coalescenceParticleFsi3d.cpp" ]; then
+            echo 'Generated source not uploaded yet; smoke test only.'
+            exit 0
+          fi
+          CASE_CPP=$(find /tmp/openlb/examples -name contactAngle3d.cpp -print -quit)
+          CASE_DIR=$(dirname "$CASE_CPP")
+          cp "$GITHUB_WORKSPACE/coalescenceParticleFsi3d.cpp" "$CASE_DIR/coalescenceParticleFsi3d.cpp"
+          sed 's/contactAngle3d/coalescenceParticleFsi3d/g' "$CASE_DIR/Makefile" > "$CASE_DIR/Makefile.generated"
+          mv "$CASE_DIR/Makefile.generated" "$CASE_DIR/Makefile"
+          make -C "$CASE_DIR" clean
+          make -C "$CASE_DIR" -j2
